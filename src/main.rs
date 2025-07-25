@@ -10,11 +10,11 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("Could not connect to session dbus")?;
 
-    let sources_proxy = dbus::sources::SourcesObjectManagerProxy::new(&conn)
+    let sources_proxy = dbus::sources::SourcesProxy::new(&conn)
         .await
         .context("Could not build sources object manager proxy")?;
 
-    let calendar_proxy = dbus::calendar::CalendarFactoryProxy::new(&conn)
+    let calendar_factory_proxy = dbus::calendar::CalendarFactoryProxy::new(&conn)
         .await
         .context("Could not build calendar factory proxy")?;
 
@@ -27,15 +27,24 @@ async fn main() -> anyhow::Result<()> {
         .iter()
         .filter(|source| source.has_calendar)
         .collect();
-    println!("{:#?}", calendar_sources);
 
     for source in calendar_sources.iter() {
-        let value = calendar_proxy
+        let (path, _) = calendar_factory_proxy
             .open_calendar(&source.uid)
             .await
-            .context(format!("Could not open calendar for {:?}", source.uid));
+            .context(format!("Could not open calendar for {:?}", source.uid))?;
 
-        println!("{:?} {:?}", source.uid, value);
+        let calendar_proxy = dbus::calendar::CalendarProxy::builder(&conn)
+            .path(path)
+            .context("Could not set path on calendar proxy")?
+            .build()
+            .await
+            .context("Could not create calendar proxy")?;
+
+        let events = calendar_proxy
+            .list_today_events()
+            .await
+            .context("Could not load today events")?;
     }
 
     Ok(())

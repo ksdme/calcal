@@ -7,7 +7,7 @@ use zbus::zvariant;
     default_path = "/org/gnome/evolution/dataserver/SourceManager",
     interface = "org.freedesktop.DBus.ObjectManager"
 )]
-pub trait SourcesObjectManager {
+pub trait Sources {
     // Returns the source objects that are created and managed at runtime.
     // Uses the standard org.freedesktop.DBus.ObjectManager.
     async fn get_managed_objects(
@@ -27,7 +27,7 @@ pub struct Source {
     pub has_calendar: bool,
 }
 
-impl<'a> SourcesObjectManagerProxy<'a> {
+impl<'a> SourcesProxy<'a> {
     // Returns a list of all the EDS sources from the dbus.
     pub async fn list_sources(&self) -> zbus::Result<Vec<Source>> {
         let mut sources: Vec<Source> = vec![];

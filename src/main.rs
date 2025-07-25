@@ -15,11 +15,11 @@ async fn main() -> anyhow::Result<()> {
         .context("Could not build Sources object manager proxy")?;
 
     let sources = sources_proxy
-        .get_managed_objects()
+        .list_sources()
         .await
         .context("Could not query for managed objects")?;
 
-    println!("{:?}", sources);
+    println!("{:#?}", sources);
 
     Ok(())
 }

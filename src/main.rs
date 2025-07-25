@@ -10,7 +10,7 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("Could not connect to session dbus")?;
 
-    let sources_proxy = dbus::SourcesObjectManagerProxy::new(&conn)
+    let sources_proxy = dbus::sources::SourcesObjectManagerProxy::new(&conn)
         .await
         .context("Could not build Sources object manager proxy")?;
 

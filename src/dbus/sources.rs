@@ -19,12 +19,12 @@ pub trait SourcesObjectManager {
 
 #[derive(Debug)]
 pub struct Source {
-    object_path: String,
+    pub object_path: String,
 
-    uid: String,
-    display_name: Option<String>,
+    pub uid: String,
+    pub display_name: Option<String>,
 
-    has_calendar: bool,
+    pub has_calendar: bool,
 }
 
 impl<'a> SourcesObjectManagerProxy<'a> {

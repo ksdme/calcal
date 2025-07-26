@@ -15,14 +15,12 @@ async fn main() -> anyhow::Result<()> {
         .context("Could not list all calendars")?;
 
     for calendar in calendars.iter() {
-        println!("{:#?}", calendar.display_name);
-
         let events = calendar
-            .fetch_today_events(&conn)
+            .fetch_today_events()
             .await
             .context("Could not fetch today events")?;
 
-        println!("{:#?}", events);
+        println!("{:?} {:#?}", calendar.display_name, events);
     }
 
     Ok(())

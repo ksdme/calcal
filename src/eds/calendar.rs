@@ -4,14 +4,16 @@ use calcard::icalendar;
 use gio::glib;
 
 #[derive(Debug)]
-pub struct Calendar {
+pub struct Calendar<'a> {
+    conn: &'a zbus::Connection,
+
     pub uid: String,
     pub display_name: Option<String>,
 }
 
-impl Calendar {
+impl<'a> Calendar<'a> {
     // Returns a list of all the calendars that were found on the Evolution Data Server.
-    pub async fn fetch_all(conn: &zbus::Connection) -> anyhow::Result<Vec<Self>> {
+    pub async fn fetch_all(conn: &'a zbus::Connection) -> anyhow::Result<Vec<Self>> {
         let sources_proxy = ipc::SourcesProxy::new(conn)
             .await
             .context("Could not build sources proxy")?;
@@ -57,6 +59,7 @@ impl Calendar {
             }
 
             calendars.push(Self {
+                conn: conn,
                 uid: uid,
                 display_name: data
                     .as_ref()
@@ -71,11 +74,10 @@ impl Calendar {
     // Returns a list of all the events found on this calendar on the EDS.
     async fn fetch_events(
         &self,
-        conn: &zbus::Connection,
         starts: jiff::Zoned,
         ends: jiff::Zoned,
     ) -> anyhow::Result<Vec<icalendar::ICalendarComponent>> {
-        let calendar_factory_proxy = ipc::CalendarFactoryProxy::new(conn)
+        let calendar_factory_proxy = ipc::CalendarFactoryProxy::new(self.conn)
             .await
             .context("Could not build calendar factory proxy")?;
 
@@ -84,7 +86,7 @@ impl Calendar {
             .await
             .context("Could not query calendar")?;
 
-        let calendar_proxy = ipc::CalendarProxy::builder(conn)
+        let calendar_proxy = ipc::CalendarProxy::builder(self.conn)
             .path(calendar_path)
             .context("Could not set path on calendar proxy")?
             .build()
@@ -121,10 +123,7 @@ impl Calendar {
     }
 
     // Returns a list of events that are scheduled for today.
-    pub async fn fetch_today_events(
-        &self,
-        conn: &zbus::Connection,
-    ) -> anyhow::Result<Vec<icalendar::ICalendarComponent>> {
+    pub async fn fetch_today_events(&self) -> anyhow::Result<Vec<icalendar::ICalendarComponent>> {
         let now = jiff::Zoned::now();
 
         let starts = now
@@ -137,6 +136,6 @@ impl Calendar {
             .start_of_day()
             .context("Could not determine start of tomorrow")?;
 
-        self.fetch_events(conn, starts, ends).await
+        self.fetch_events(starts, ends).await
     }
 }

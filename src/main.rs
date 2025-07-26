@@ -1,6 +1,6 @@
 use anyhow::Context;
 
-mod dbus;
+mod eds;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -10,41 +10,19 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("Could not connect to session dbus")?;
 
-    let sources_proxy = dbus::sources::SourcesProxy::new(&conn)
+    let calendars = eds::calendar::Calendar::fetch_all(&conn)
         .await
-        .context("Could not build sources object manager proxy")?;
+        .context("Could not list all calendars")?;
 
-    let calendar_factory_proxy = dbus::calendar::CalendarFactoryProxy::new(&conn)
-        .await
-        .context("Could not build calendar factory proxy")?;
+    for calendar in calendars.iter() {
+        println!("{:#?}", calendar.display_name);
 
-    let sources = sources_proxy
-        .list_sources()
-        .await
-        .context("Could not query for managed objects")?;
-
-    let calendar_sources: Vec<&dbus::sources::Source> = sources
-        .iter()
-        .filter(|source| source.has_calendar)
-        .collect();
-
-    for source in calendar_sources.iter() {
-        let (path, _) = calendar_factory_proxy
-            .open_calendar(&source.uid)
+        let events = calendar
+            .fetch_today_events(&conn)
             .await
-            .context(format!("Could not open calendar for {:?}", source.uid))?;
+            .context("Could not fetch today events")?;
 
-        let calendar_proxy = dbus::calendar::CalendarProxy::builder(&conn)
-            .path(path)
-            .context("Could not set path on calendar proxy")?
-            .build()
-            .await
-            .context("Could not create calendar proxy")?;
-
-        let events = calendar_proxy
-            .list_today_events()
-            .await
-            .context("Could not load today events")?;
+        println!("{:#?}", events);
     }
 
     Ok(())

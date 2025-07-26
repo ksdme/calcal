@@ -16,7 +16,7 @@ async fn main() -> anyhow::Result<()> {
 
     for calendar in calendars.iter() {
         let events = calendar
-            .fetch_today_events()
+            .fetch_near_events()
             .await
             .context("Could not fetch today events")?;
 

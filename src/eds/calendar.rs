@@ -76,7 +76,7 @@ impl<'a> Calendar<'a> {
         &self,
         starts: jiff::Zoned,
         ends: jiff::Zoned,
-    ) -> anyhow::Result<Vec<icalendar::ICalendarComponent>> {
+    ) -> anyhow::Result<Vec<super::event::Event>> {
         let calendar_factory_proxy = ipc::CalendarFactoryProxy::new(self.conn)
             .await
             .context("Could not build calendar factory proxy")?;
@@ -119,21 +119,26 @@ impl<'a> Calendar<'a> {
             })
             .collect();
 
-        Ok(events)
+        Ok(events
+            .into_iter()
+            .map(|it| super::event::Event::from(it))
+            .collect())
     }
 
-    // Returns a list of events that are scheduled for today.
-    pub async fn fetch_today_events(&self) -> anyhow::Result<Vec<icalendar::ICalendarComponent>> {
+    // Returns a list of events that were scheduled from start of yesterday to end of tomorrow.
+    pub async fn fetch_near_events(&self) -> anyhow::Result<Vec<super::event::Event>> {
         let now = jiff::Zoned::now();
 
         let starts = now
+            .yesterday()
+            .context("Could not determine date of yesteday")?
             .start_of_day()
             .context("Could not determine start of today")?;
 
         let ends = now
             .tomorrow()
             .context("Could not determine date of tomorrow")?
-            .start_of_day()
+            .end_of_day()
             .context("Could not determine start of tomorrow")?;
 
         self.fetch_events(starts, ends).await

@@ -1,5 +1,8 @@
 use anyhow::Context;
 use calcard::icalendar;
+use chrono::{Datelike, TimeZone};
+use chrono_tz::Tz;
+use chrono_tz::UTC;
 
 #[derive(Debug)]
 pub struct Event {
@@ -9,8 +12,8 @@ pub struct Event {
     pub description: Option<String>,
 
     pub status: Option<icalendar::ICalendarStatus>,
-    pub starts: Option<jiff::Zoned>,
-    pub ends: Option<jiff::Zoned>,
+    pub starts: Option<chrono::DateTime<chrono::FixedOffset>>,
+    pub ends: Option<chrono::DateTime<chrono::FixedOffset>>,
 }
 
 impl From<icalendar::ICalendarComponent> for Event {
@@ -25,10 +28,16 @@ impl From<icalendar::ICalendarComponent> for Event {
             ),
 
             status: component.status().map(|status| status.clone()),
-            starts: zoned_calendar_property(&component, &icalendar::ICalendarProperty::Dtstart)
-                .and_then(|dt| dt.ok()),
-            ends: zoned_calendar_property(&component, &icalendar::ICalendarProperty::Dtend)
-                .and_then(|dt| dt.ok()),
+            starts: fixed_offset_datetime_calendar_property(
+                &component,
+                &icalendar::ICalendarProperty::Dtstart,
+            )
+            .and_then(|dt| dt.ok()),
+            ends: fixed_offset_datetime_calendar_property(
+                &component,
+                &icalendar::ICalendarProperty::Dtend,
+            )
+            .and_then(|dt| dt.ok()),
         }
     }
 }
@@ -50,41 +59,51 @@ fn str_calendar_property(
 
 // Transform the date time value from the calendar component while taking the
 // timezone into account.
-fn zoned_calendar_property(
+fn fixed_offset_datetime_calendar_property(
     component: &icalendar::ICalendarComponent,
     property: &icalendar::ICalendarProperty,
-) -> Option<anyhow::Result<jiff::Zoned>> {
+) -> Option<anyhow::Result<chrono::DateTime<chrono::FixedOffset>>> {
     let property = component.property(property)?;
 
+    // NaiveDateTime
+    let now = chrono::Local::now();
+    let dt = property.values.first()?.as_partial_date_time()?;
+    let dt = chrono::NaiveDate::from_ymd_opt(
+        dt.year.map(|y| y as i32).unwrap_or(now.year()),
+        dt.month.map(|m| m as u32).unwrap_or(now.month()),
+        dt.day.map(|d| d as u32).unwrap_or(now.day()),
+    )?
+    .and_time(chrono::NaiveTime::from_hms_opt(
+        dt.hour.map(|h| h as u32).unwrap_or_default(),
+        dt.minute.map(|m| m as u32).unwrap_or_default(),
+        dt.second.map(|s| s as u32).unwrap_or_default(),
+    )?);
+
+    // Timezone
     let tz = property.params.first().and_then(|value| match value {
         icalendar::ICalendarParameter::Tzid(tz) => Some(tz),
         _ => None,
     });
-    let tz = if let Some(tz) = tz {
-        match jiff::tz::TimeZone::get(tz).context("Could not resolve timezone") {
-            Ok(tz) => tz,
-            Err(err) => return Some(Err(err)),
+
+    // DateTime
+    if let Some(tz) = tz {
+        match tz
+            .as_str()
+            .parse::<chrono_tz::Tz>()
+            .context("Could not parse timezone")
+        {
+            Ok(tz) => tz
+                .from_local_datetime(&dt)
+                .earliest()
+                .map(|dt| dt.fixed_offset())
+                .and_then(|dt| Some(Ok(dt))),
+            Err(err) => Some(Err(err)),
         }
     } else {
-        jiff::tz::TimeZone::system()
-    };
-
-    let dt = property.values.first()?.as_partial_date_time()?;
-    let now = jiff::Zoned::now();
-    Some(
-        jiff::civil::DateTime::new(
-            dt.year.and_then(|y| Some(y as i16)).unwrap_or(now.year()),
-            dt.month.and_then(|m| Some(m as i8)).unwrap_or(now.month()),
-            dt.day.and_then(|d| Some(d as i8)).unwrap_or(now.day()),
-            dt.hour.and_then(|h| Some(h as i8)).unwrap_or_default(),
-            dt.minute.and_then(|m| Some(m as i8)).unwrap_or_default(),
-            dt.second.and_then(|s| Some(s as i8)).unwrap_or_default(),
-            0,
-        )
-        .context("Could not build civil date time")
-        .and_then(|dt| {
-            dt.to_zoned(tz)
-                .context("Could not build timezone aware date time")
-        }),
-    )
+        chrono::Local
+            .from_local_datetime(&dt)
+            .earliest()
+            .map(|dt| dt.fixed_offset())
+            .and_then(|dt| Some(Ok(dt)))
+    }
 }

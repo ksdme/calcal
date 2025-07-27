@@ -1,6 +1,7 @@
 use crate::eds::ipc;
 use anyhow::Context;
 use calcard::icalendar;
+use chrono::Days;
 use gio::glib;
 
 #[derive(Debug)]
@@ -72,11 +73,15 @@ impl<'a> Calendar<'a> {
     }
 
     // Returns a list of all the events found on this calendar on the EDS.
-    async fn fetch_events(
+    async fn fetch_events<T>(
         &self,
-        starts: jiff::Zoned,
-        ends: jiff::Zoned,
-    ) -> anyhow::Result<Vec<super::event::Event>> {
+        starts: chrono::DateTime<T>,
+        ends: chrono::DateTime<T>,
+    ) -> anyhow::Result<Vec<super::event::Event>>
+    where
+        T: chrono::TimeZone,
+        T::Offset: std::fmt::Display,
+    {
         let calendar_factory_proxy = ipc::CalendarFactoryProxy::new(self.conn)
             .await
             .context("Could not build calendar factory proxy")?;
@@ -99,8 +104,8 @@ impl<'a> Calendar<'a> {
                 (make-time \"{}\")
                 (make-time \"{}\"))
             ",
-            starts.strftime("%Y%m%dT%H%M%S"),
-            ends.strftime("%Y%m%dT%H%M%S")
+            starts.format("%Y%m%dT%H%M%S"),
+            ends.format("%Y%m%dT%H%M%S")
         );
 
         let events = calendar_proxy
@@ -127,19 +132,19 @@ impl<'a> Calendar<'a> {
 
     // Returns a list of events that were scheduled from start of yesterday to end of tomorrow.
     pub async fn fetch_near_events(&self) -> anyhow::Result<Vec<super::event::Event>> {
-        let now = jiff::Zoned::now();
+        let now = chrono::Local::now();
 
         let starts = now
-            .yesterday()
-            .context("Could not determine date of yesteday")?
-            .start_of_day()
-            .context("Could not determine start of today")?;
+            .with_time(chrono::NaiveTime::default())
+            .earliest()
+            .and_then(|dt| dt.checked_sub_days(Days::new(1)))
+            .context("Could not determine start of yesterday")?;
 
         let ends = now
-            .tomorrow()
-            .context("Could not determine date of tomorrow")?
-            .end_of_day()
-            .context("Could not determine start of tomorrow")?;
+            .with_time(chrono::NaiveTime::default())
+            .earliest()
+            .and_then(|dt| dt.checked_add_days(chrono::Days::new(2)))
+            .context("Could not determine the start of day after tomorrow")?;
 
         self.fetch_events(starts, ends).await
     }

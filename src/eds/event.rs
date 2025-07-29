@@ -5,36 +5,44 @@ use chrono::{Datelike, TimeZone};
 #[derive(Debug)]
 pub struct Event {
     pub uid: Option<String>,
+    pub status: Option<icalendar::ICalendarStatus>,
 
     pub title: Option<String>,
     pub description: Option<String>,
 
-    pub status: Option<icalendar::ICalendarStatus>,
     pub starts: Option<chrono::DateTime<rrule::Tz>>,
     pub ends: Option<chrono::DateTime<rrule::Tz>>,
 }
 
+impl From<&icalendar::ICalendarComponent> for Event {
+    fn from(component: &icalendar::ICalendarComponent) -> Self {
+        Self {
+            uid: component.uid().map(|uid| uid.to_owned()),
+            status: component.status().map(|status| status.clone()),
+
+            title: str_property(&component, &icalendar::ICalendarProperty::Summary),
+            description: str_property(&component, &icalendar::ICalendarProperty::Description),
+
+            starts: match dt_property(&component, &icalendar::ICalendarProperty::Dtstart) {
+                Some(Ok(dtstarts)) => Some(dtstarts),
+                _ => None,
+            },
+            ends: match dt_property(&component, &icalendar::ICalendarProperty::Dtend) {
+                Some(Ok(dtends)) => Some(dtends),
+                _ => None,
+            },
+        }
+    }
+}
+
 impl Event {
-    pub fn for_recurrences(
+    pub fn from_recurrences(
         component: &icalendar::ICalendarComponent,
         recurrences: rrule::RRuleResult,
     ) -> Vec<Self> {
-        let uid = component.uid().map(|uid| uid.to_owned());
-        let status = component.status().map(|status| status.clone());
+        let root = Event::from(component);
 
-        let title = str_property(&component, &icalendar::ICalendarProperty::Summary);
-        let description = str_property(&component, &icalendar::ICalendarProperty::Description);
-
-        // Calculate the duration of the event.
-        let dtstarts = match dt_property(&component, &icalendar::ICalendarProperty::Dtstart) {
-            Some(Ok(dtstarts)) => Some(dtstarts),
-            _ => None,
-        };
-        let dtends = match dt_property(&component, &icalendar::ICalendarProperty::Dtend) {
-            Some(Ok(dtends)) => Some(dtends),
-            _ => None,
-        };
-        let duration = match (dtstarts, dtends) {
+        let duration = match (root.starts, root.ends) {
             (Some(dtstarts), Some(dtends)) => Some(dtends.to_utc() - dtstarts.to_utc()),
             _ => None,
         };
@@ -43,11 +51,11 @@ impl Event {
             .dates
             .into_iter()
             .map(|starts| Self {
-                uid: uid.clone(),
-                status: status.clone(),
+                uid: root.uid.clone(),
+                status: root.status.clone(),
 
-                title: title.clone(),
-                description: description.clone(),
+                title: root.title.clone(),
+                description: root.description.clone(),
 
                 starts: Some(starts),
                 ends: duration.map(|duration| starts + duration),

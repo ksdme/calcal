@@ -120,54 +120,20 @@ impl<'a> Calendar<'a> {
             })
             .collect();
 
-        let mut events = Vec::new();
-        for vevent in vevents.iter() {
-            let mut rule = String::new();
-
-            vevent
-                .property(&calcard::icalendar::ICalendarProperty::Dtstart)
-                .and_then(|it| it.write_to(&mut rule).ok());
-
-            vevent
-                .property(&calcard::icalendar::ICalendarProperty::Rrule)
-                .and_then(|it| it.write_to(&mut rule).ok());
-
-            vevent
-                .property(&calcard::icalendar::ICalendarProperty::Rdate)
-                .and_then(|it| it.write_to(&mut rule).ok());
-
-            vevent
-                .property(&calcard::icalendar::ICalendarProperty::Exdate)
-                .and_then(|it| it.write_to(&mut rule).ok());
-
-            vevent
-                .property(&calcard::icalendar::ICalendarProperty::Exrule)
-                .and_then(|it| it.write_to(&mut rule).ok());
-
-            if let Ok(rrule) = rule.as_str().parse::<rrule::RRuleSet>() {
-                let Some(starts) = starts
-                    .naive_local()
-                    .and_local_timezone(rrule::Tz::Local(chrono::Local))
-                    .earliest()
-                else {
-                    continue;
-                };
-
-                let Some(ends) = ends
-                    .naive_local()
-                    .and_local_timezone(rrule::Tz::Local(chrono::Local))
-                    .earliest()
-                else {
-                    continue;
-                };
-
-                let mut vevent_events =
-                    Event::for_recurrences(&vevent, rrule.after(starts).before(ends).all(32));
-                events.append(&mut vevent_events);
-            }
-        }
-
-        Ok(events)
+        Ok(vevents
+            .iter()
+            .flat_map(|vevent| {
+                // TODO: Is this enough to know if we should be expanding?
+                if vevent
+                    .property(&icalendar::ICalendarProperty::Rrule)
+                    .is_some()
+                {
+                    expand_events(vevent, starts, ends).unwrap_or_default()
+                } else {
+                    vec![Event::from(vevent)]
+                }
+            })
+            .collect())
     }
 
     // Returns a list of events that were scheduled from start of yesterday to end of tomorrow.
@@ -187,5 +153,48 @@ impl<'a> Calendar<'a> {
             .context("Could not determine the start of day after tomorrow")?;
 
         self.fetch_events(starts, ends).await
+    }
+}
+
+// Returns a recurrence expanded list of events.
+fn expand_events(
+    root: &icalendar::ICalendarComponent,
+    starts: chrono::DateTime<chrono::Local>,
+    ends: chrono::DateTime<chrono::Local>,
+) -> Option<Vec<Event>> {
+    let mut rule = String::new();
+
+    root.property(&calcard::icalendar::ICalendarProperty::Dtstart)
+        .and_then(|it| it.write_to(&mut rule).ok());
+
+    root.property(&calcard::icalendar::ICalendarProperty::Rrule)
+        .and_then(|it| it.write_to(&mut rule).ok());
+
+    root.property(&calcard::icalendar::ICalendarProperty::Rdate)
+        .and_then(|it| it.write_to(&mut rule).ok());
+
+    root.property(&calcard::icalendar::ICalendarProperty::Exdate)
+        .and_then(|it| it.write_to(&mut rule).ok());
+
+    root.property(&calcard::icalendar::ICalendarProperty::Exrule)
+        .and_then(|it| it.write_to(&mut rule).ok());
+
+    if let Ok(rrule) = rule.as_str().parse::<rrule::RRuleSet>() {
+        let starts = starts
+            .naive_local()
+            .and_local_timezone(rrule::Tz::Local(chrono::Local))
+            .earliest()?;
+
+        let ends = ends
+            .naive_local()
+            .and_local_timezone(rrule::Tz::Local(chrono::Local))
+            .earliest()?;
+
+        Some(Event::from_recurrences(
+            &root,
+            rrule.after(starts).before(ends).all(32),
+        ))
+    } else {
+        None
     }
 }

@@ -1,8 +1,6 @@
 use anyhow::Context;
 use calcard::icalendar;
 use chrono::{Datelike, TimeZone};
-use chrono_tz::Tz;
-use chrono_tz::UTC;
 
 #[derive(Debug)]
 pub struct Event {
@@ -12,38 +10,54 @@ pub struct Event {
     pub description: Option<String>,
 
     pub status: Option<icalendar::ICalendarStatus>,
-    pub starts: Option<chrono::DateTime<chrono::FixedOffset>>,
-    pub ends: Option<chrono::DateTime<chrono::FixedOffset>>,
+    pub starts: Option<chrono::DateTime<rrule::Tz>>,
+    pub ends: Option<chrono::DateTime<rrule::Tz>>,
 }
 
-impl From<icalendar::ICalendarComponent> for Event {
-    fn from(component: icalendar::ICalendarComponent) -> Self {
-        Self {
-            uid: component.uid().map(|uid| uid.to_owned()),
+impl Event {
+    pub fn for_recurrences(
+        component: &icalendar::ICalendarComponent,
+        recurrences: rrule::RRuleResult,
+    ) -> Vec<Self> {
+        let uid = component.uid().map(|uid| uid.to_owned());
+        let status = component.status().map(|status| status.clone());
 
-            title: str_calendar_property(&component, &icalendar::ICalendarProperty::Summary),
-            description: str_calendar_property(
-                &component,
-                &icalendar::ICalendarProperty::Description,
-            ),
+        let title = str_property(&component, &icalendar::ICalendarProperty::Summary);
+        let description = str_property(&component, &icalendar::ICalendarProperty::Description);
 
-            status: component.status().map(|status| status.clone()),
-            starts: fixed_offset_datetime_calendar_property(
-                &component,
-                &icalendar::ICalendarProperty::Dtstart,
-            )
-            .and_then(|dt| dt.ok()),
-            ends: fixed_offset_datetime_calendar_property(
-                &component,
-                &icalendar::ICalendarProperty::Dtend,
-            )
-            .and_then(|dt| dt.ok()),
-        }
+        // Calculate the duration of the event.
+        let dtstarts = match dt_property(&component, &icalendar::ICalendarProperty::Dtstart) {
+            Some(Ok(dtstarts)) => Some(dtstarts),
+            _ => None,
+        };
+        let dtends = match dt_property(&component, &icalendar::ICalendarProperty::Dtend) {
+            Some(Ok(dtends)) => Some(dtends),
+            _ => None,
+        };
+        let duration = match (dtstarts, dtends) {
+            (Some(dtstarts), Some(dtends)) => Some(dtends.to_utc() - dtstarts.to_utc()),
+            _ => None,
+        };
+
+        recurrences
+            .dates
+            .into_iter()
+            .map(|starts| Self {
+                uid: uid.clone(),
+                status: status.clone(),
+
+                title: title.clone(),
+                description: description.clone(),
+
+                starts: Some(starts),
+                ends: duration.map(|duration| starts + duration),
+            })
+            .collect()
     }
 }
 
 // Load up a property from the calendar component as a string value.
-fn str_calendar_property(
+fn str_property(
     component: &icalendar::ICalendarComponent,
     property: &icalendar::ICalendarProperty,
 ) -> Option<String> {
@@ -59,10 +73,10 @@ fn str_calendar_property(
 
 // Transform the date time value from the calendar component while taking the
 // timezone into account.
-fn fixed_offset_datetime_calendar_property(
+fn dt_property(
     component: &icalendar::ICalendarComponent,
     property: &icalendar::ICalendarProperty,
-) -> Option<anyhow::Result<chrono::DateTime<chrono::FixedOffset>>> {
+) -> Option<anyhow::Result<chrono::DateTime<rrule::Tz>>> {
     let property = component.property(property)?;
 
     // NaiveDateTime
@@ -92,18 +106,16 @@ fn fixed_offset_datetime_calendar_property(
             .parse::<chrono_tz::Tz>()
             .context("Could not parse timezone")
         {
-            Ok(tz) => tz
+            Ok(tz) => rrule::Tz::Tz(tz)
                 .from_local_datetime(&dt)
                 .earliest()
-                .map(|dt| dt.fixed_offset())
                 .and_then(|dt| Some(Ok(dt))),
             Err(err) => Some(Err(err)),
         }
     } else {
-        chrono::Local
+        rrule::Tz::Local(chrono::Local)
             .from_local_datetime(&dt)
             .earliest()
-            .map(|dt| dt.fixed_offset())
             .and_then(|dt| Some(Ok(dt)))
     }
 }

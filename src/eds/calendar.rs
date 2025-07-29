@@ -1,7 +1,7 @@
-use crate::eds::ipc;
+use crate::eds::{event::Event, ipc};
 use anyhow::Context;
 use calcard::icalendar;
-use chrono::Days;
+use chrono::{Days, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
 use gio::glib;
 
 #[derive(Debug)]
@@ -73,15 +73,11 @@ impl<'a> Calendar<'a> {
     }
 
     // Returns a list of all the events found on this calendar on the EDS.
-    async fn fetch_events<T>(
+    async fn fetch_events(
         &self,
-        starts: chrono::DateTime<T>,
-        ends: chrono::DateTime<T>,
-    ) -> anyhow::Result<Vec<super::event::Event>>
-    where
-        T: chrono::TimeZone,
-        T::Offset: std::fmt::Display,
-    {
+        starts: chrono::DateTime<chrono::Local>,
+        ends: chrono::DateTime<chrono::Local>,
+    ) -> anyhow::Result<Vec<super::event::Event>> {
         let calendar_factory_proxy = ipc::CalendarFactoryProxy::new(self.conn)
             .await
             .context("Could not build calendar factory proxy")?;
@@ -108,12 +104,12 @@ impl<'a> Calendar<'a> {
             ends.format("%Y%m%dT%H%M%S")
         );
 
-        let events = calendar_proxy
+        let vevent_result = calendar_proxy
             .get_object_list(&q)
             .await
             .context("Could not query events")?;
 
-        let events: Vec<icalendar::ICalendarComponent> = events
+        let vevents: Vec<icalendar::ICalendarComponent> = vevent_result
             .iter()
             .filter_map(|item| icalendar::ICalendar::parse(item).ok())
             .flat_map(|cal| -> Vec<icalendar::ICalendarComponent> {
@@ -124,10 +120,54 @@ impl<'a> Calendar<'a> {
             })
             .collect();
 
-        Ok(events
-            .into_iter()
-            .map(|it| super::event::Event::from(it))
-            .collect())
+        let mut events = Vec::new();
+        for vevent in vevents.iter() {
+            let mut rule = String::new();
+
+            vevent
+                .property(&calcard::icalendar::ICalendarProperty::Dtstart)
+                .and_then(|it| it.write_to(&mut rule).ok());
+
+            vevent
+                .property(&calcard::icalendar::ICalendarProperty::Rrule)
+                .and_then(|it| it.write_to(&mut rule).ok());
+
+            vevent
+                .property(&calcard::icalendar::ICalendarProperty::Rdate)
+                .and_then(|it| it.write_to(&mut rule).ok());
+
+            vevent
+                .property(&calcard::icalendar::ICalendarProperty::Exdate)
+                .and_then(|it| it.write_to(&mut rule).ok());
+
+            vevent
+                .property(&calcard::icalendar::ICalendarProperty::Exrule)
+                .and_then(|it| it.write_to(&mut rule).ok());
+
+            if let Ok(rrule) = rule.as_str().parse::<rrule::RRuleSet>() {
+                let Some(starts) = starts
+                    .naive_local()
+                    .and_local_timezone(rrule::Tz::Local(chrono::Local))
+                    .earliest()
+                else {
+                    continue;
+                };
+
+                let Some(ends) = ends
+                    .naive_local()
+                    .and_local_timezone(rrule::Tz::Local(chrono::Local))
+                    .earliest()
+                else {
+                    continue;
+                };
+
+                let mut vevent_events =
+                    Event::for_recurrences(&vevent, rrule.after(starts).before(ends).all(32));
+                events.append(&mut vevent_events);
+            }
+        }
+
+        Ok(events)
     }
 
     // Returns a list of events that were scheduled from start of yesterday to end of tomorrow.

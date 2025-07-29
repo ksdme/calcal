@@ -20,7 +20,7 @@ async fn main() -> anyhow::Result<()> {
             .await
             .context("Could not fetch today events")?;
 
-        println!("{:?} {:#?}", calendar.display_name, events);
+        println!("{:#?}", events);
     }
 
     Ok(())

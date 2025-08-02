@@ -56,11 +56,15 @@ async fn main() -> anyhow::Result<()> {
     } else {
         // Remaining events are either in progress or are upcoming.
         if let Some((starts, _, event)) = active_events.first() {
-            print!(
-                "{} in {}",
-                event.title.clone().unwrap_or("Unknown Event".to_owned()),
-                report_duration(starts.to_utc() - now.to_utc()),
-            );
+            if starts.with_timezone(&chrono::Local).date_naive() == now.date_naive() {
+                print!(
+                    "{} in {}",
+                    event.title.clone().unwrap_or("Unknown Event".to_owned()),
+                    report_duration(starts.to_utc() - now.to_utc()),
+                );
+            } else {
+                print!("No Upcoming Event Today");
+            }
         } else {
             println!("No Upcoming Event");
         }
@@ -69,6 +73,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+// Returns a short human formatted duration.
 fn report_duration(delta: chrono::TimeDelta) -> String {
     let mut seconds = delta.num_seconds().max(0) as u64;
     seconds -= seconds % 60;

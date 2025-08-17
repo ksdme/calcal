@@ -1,9 +1,6 @@
-use std::cell::Cell;
-
 use anyhow::Context;
 use calcard::icalendar;
 use clap::Parser;
-use prettytable::Row;
 
 mod eds;
 mod utils;

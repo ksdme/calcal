@@ -23,6 +23,10 @@ enum Command {
         /// available to nexte. You can run `nexte calendars` to find out the names of all
         /// the available calendars.
         calendars: Option<Vec<String>>,
+
+        /// If enabled, the summary will only contain events from today.
+        #[arg(default_value_t = true)]
+        limit_to_today: bool,
     },
 }
 
@@ -41,8 +45,11 @@ async fn main() -> anyhow::Result<()> {
             calendars(&conn).await.context("Could not list calendars")?;
         }
 
-        Command::Summary { calendars } => {
-            summary(&conn, calendars)
+        Command::Summary {
+            calendars,
+            limit_to_today,
+        } => {
+            summary(&conn, calendars, limit_to_today)
                 .await
                 .context("Could not generate summary")?;
         }
@@ -69,7 +76,11 @@ async fn calendars(conn: &zbus::Connection) -> anyhow::Result<()> {
 }
 
 // Returns the status of the current or upcoming events.
-async fn summary(conn: &zbus::Connection, whitelist: Option<Vec<String>>) -> anyhow::Result<()> {
+async fn summary(
+    conn: &zbus::Connection,
+    whitelist: Option<Vec<String>>,
+    limit_to_today: bool,
+) -> anyhow::Result<()> {
     let mut calendars = fetch_calendars(conn).await?;
 
     // Apply the whitelist if necessary.
@@ -138,7 +149,9 @@ async fn summary(conn: &zbus::Connection, whitelist: Option<Vec<String>>) -> any
     } else {
         // Remaining events are either in progress or are upcoming.
         if let Some((starts, _, event)) = active_events.first() {
-            if starts.with_timezone(&chrono::Local).date_naive() == now.date_naive() {
+            if !limit_to_today
+                || starts.with_timezone(&chrono::Local).date_naive() == now.date_naive()
+            {
                 print!(
                     "{} in {}",
                     event.title.clone().unwrap_or("Unknown Event".to_owned()),

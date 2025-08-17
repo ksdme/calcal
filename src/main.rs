@@ -62,15 +62,21 @@ async fn main() -> anyhow::Result<()> {
             calendars,
             limit_to_today,
         } => {
-            summary(&conn, calendars, limit_to_today)
-                .await
-                .context("Could not generate summary")?;
+            println!(
+                "{}",
+                summary(&conn, calendars, limit_to_today)
+                    .await
+                    .context("Could not generate summary")?,
+            );
         }
 
         Command::Today { calendars } => {
-            today(&conn, calendars)
-                .await
-                .context("Could not generate full calendar")?;
+            println!(
+                "{}",
+                today(&conn, calendars)
+                    .await
+                    .context("Could not generate full calendar")?,
+            )
         }
     }
 
@@ -99,7 +105,7 @@ async fn summary(
     conn: &zbus::Connection,
     whitelist: Option<Vec<String>>,
     limit_to_today: bool,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<String> {
     let near_events = near_events(conn, whitelist).await?;
 
     // Filter out events that do not have a start and an end date.
@@ -120,7 +126,7 @@ async fn summary(
         .collect();
 
     if ongoing.len() > 0 {
-        println!(
+        return Ok(format!(
             "{}",
             ongoing
                 .iter()
@@ -131,9 +137,7 @@ async fn summary(
                 ))
                 .collect::<Vec<String>>()
                 .join(", ")
-        );
-
-        return Ok(());
+        ));
     }
 
     // If we are here, it means all events are upcoming.
@@ -171,23 +175,21 @@ async fn summary(
                 .collect::<Vec<&str>>()
                 .join(", ");
 
-            print!(
+            return Ok(format!(
                 "{} in {}",
                 names,
                 utils::human_short_duration(starts.to_utc() - now.to_utc()),
-            );
+            ));
         } else {
-            print!("No Upcoming Event Today");
+            return Ok("No Upcoming Event Today".to_owned());
         }
     } else {
-        println!("No Upcoming Events");
+        return Ok("No Upcoming Events".to_owned());
     }
-
-    Ok(())
 }
 
 // Prints a list of all the events today.
-async fn today(conn: &zbus::Connection, whitelist: Option<Vec<String>>) -> anyhow::Result<()> {
+async fn today(conn: &zbus::Connection, whitelist: Option<Vec<String>>) -> anyhow::Result<String> {
     let near_events = near_events(conn, whitelist).await?;
 
     // Filter for today.
@@ -204,8 +206,7 @@ async fn today(conn: &zbus::Connection, whitelist: Option<Vec<String>>) -> anyho
         .collect::<Vec<eds::event::Event>>();
 
     if today_events.len() == 0 {
-        println!("No Events Today");
-        return Ok(());
+        return Ok("No Events Today".to_owned());
     }
 
     // Put them in a table.
@@ -228,9 +229,8 @@ async fn today(conn: &zbus::Connection, whitelist: Option<Vec<String>>) -> anyho
             &format!("{}-{}", starts, ends),
         ]);
     }
-    table.printstd();
 
-    Ok(())
+    Ok(table.to_string())
 }
 
 // Returns a list of near events.

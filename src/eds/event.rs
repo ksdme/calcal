@@ -102,15 +102,18 @@ fn dt_property(
     )?);
 
     // Timezone
-    let tz = property.params.first().and_then(|value| match value {
-        icalendar::ICalendarParameter::Tzid(tz) => Some(tz),
-        _ => None,
-    });
+    let tz = property
+        .params
+        .first()
+        .and_then(|value| match value {
+            icalendar::ICalendarParameter::Tzid(tz) => Some(tz),
+            _ => None,
+        })
+        .map(|tz| crate::utils::normalize_timezone(tz));
 
     // DateTime
     if let Some(tz) = tz {
         match tz
-            .as_str()
             .parse::<chrono_tz::Tz>()
             .context("Could not parse timezone")
         {

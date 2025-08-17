@@ -40,7 +40,7 @@ enum Command {
         /// the available calendars.
         #[arg(short, long)]
         calendars: Option<Vec<String>>,
-    }
+    },
 }
 
 #[tokio::main]
@@ -105,46 +105,82 @@ async fn summary(
     // Filter out events that do not have a start and an end date.
     // Filter out events that were completed in the past.
     let now = chrono::Local::now().with_timezone(&rrule::Tz::Local(chrono::Local));
-    let active_events = near_events
+    let active_events: Vec<_> = near_events
         .iter()
         .filter_map(|event| match (event.starts, event.ends) {
             (Some(starts), Some(ends)) if ends > now => Some((starts, ends, event)),
             _ => None,
         })
-        .collect::<Vec<(
-            chrono::DateTime<rrule::Tz>,
-            chrono::DateTime<rrule::Tz>,
-            &eds::event::Event,
-        )>>();
+        .collect();
 
     // Check if there are any in progress events.
-    if let Some((_, ends, event)) = active_events
+    let ongoing: Vec<_> = active_events
         .iter()
         .filter(|(starts, ends, _)| starts <= &now && ends > &now)
-        .nth(0)
-    {
+        .collect();
+
+    if ongoing.len() > 0 {
         println!(
-            "{} ends in {}",
-            event.title.clone().unwrap_or("Unknown Event".to_owned()),
-            utils::human_short_duration(ends.to_utc() - now.to_utc()),
-        );
-    } else {
-        // Remaining events are either in progress or are upcoming.
-        if let Some((starts, _, event)) = active_events.first() {
-            if !limit_to_today
-                || starts.with_timezone(&chrono::Local).date_naive() == now.date_naive()
-            {
-                print!(
-                    "{} in {}",
+            "{}",
+            ongoing
+                .iter()
+                .map(|(_, ends, event)| format!(
+                    "{} ends in {}",
                     event.title.clone().unwrap_or("Unknown Event".to_owned()),
-                    utils::human_short_duration(starts.to_utc() - now.to_utc()),
-                );
-            } else {
-                print!("No Upcoming Event Today");
-            }
+                    utils::human_short_duration(ends.to_utc() - now.to_utc()),
+                ))
+                .collect::<Vec<String>>()
+                .join(", ")
+        );
+
+        return Ok(());
+    }
+
+    // If we are here, it means all events are upcoming.
+    let upcoming_events: Option<Vec<_>> = active_events.first().and_then(|(upcoming, _, _)| {
+        Some(
+            // Find a list of all the events that start at the same time as the
+            // next event.
+            active_events
+                .iter()
+                .filter(|(starts, _, _)| {
+                    upcoming.with_timezone(&chrono::Local) == starts.with_timezone(&chrono::Local)
+                })
+                .collect(),
+        )
+    });
+
+    if let Some(events) = upcoming_events
+        && events.len() > 0
+    {
+        let filtered: Vec<_> = if limit_to_today {
+            events
+                .iter()
+                .filter(|(starts, _, _)| {
+                    starts.with_timezone(&chrono::Local).date_naive() == now.date_naive()
+                })
+                .collect()
         } else {
-            println!("No Upcoming Event");
+            events.iter().collect()
+        };
+
+        if let Some((starts, _, _)) = filtered.first() {
+            let names = filtered
+                .iter()
+                .map(|(_, _, event)| event.title.as_deref().unwrap_or("Unknown Event"))
+                .collect::<Vec<&str>>()
+                .join(", ");
+
+            print!(
+                "{} in {}",
+                names,
+                utils::human_short_duration(starts.to_utc() - now.to_utc()),
+            );
+        } else {
+            print!("No Upcoming Event Today");
         }
+    } else {
+        println!("No Upcoming Events");
     }
 
     Ok(())

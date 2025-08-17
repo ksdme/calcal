@@ -19,9 +19,7 @@ enum Command {
 
     /// Generates a summary of all the ongoing events and upcoming events.
     Summary {
-        /// The whitelist of calendars to fetch the events from. Defaults to all the calendars
-        /// available to nexte. You can run `nexte calendars` to find out the names of all
-        /// the available calendars.
+        /// The whitelist of calendars to fetch the events from. Defaults to all calendars.
         #[arg(short, long)]
         calendars: Option<Vec<String>>,
 
@@ -32,11 +30,20 @@ enum Command {
 
     /// Generates a simple table of all the events today.
     Today {
-        /// The whitelist of calendars to fetch the events from. Defaults to all the calendars
-        /// available to nexte. You can run `nexte calendars` to find out the names of all
-        /// the available calendars.
+        /// The whitelist of calendars to fetch the events from. Defaults to all calendars.
         #[arg(short, long)]
         calendars: Option<Vec<String>>,
+    },
+
+    /// Emits calendar information in a Waybar compatible JSON schema.
+    Waybar {
+        /// The whitelist of calendars to fetch the events from. Defaults to all calendars.
+        #[arg(short, long)]
+        calendars: Option<Vec<String>>,
+
+        /// If enabled, the summary will only contain events from today.
+        #[arg(short, long, default_value_t = true)]
+        limit_to_today: bool,
     },
 }
 
@@ -74,6 +81,24 @@ async fn main() -> anyhow::Result<()> {
                     .await
                     .context("Could not generate full calendar")?,
             )
+        }
+
+        Command::Waybar {
+            calendars,
+            limit_to_today,
+        } => {
+            // https://man.archlinux.org/man/extra/waybar/waybar-custom.5.en#RETURN-TYPE
+            let value = serde_json::json!({
+                "text": summary(&conn, calendars.clone(), limit_to_today)
+                    .await
+                    .context("Could not generate summary")?,
+
+                "tooltip": today(&conn, calendars)
+                    .await
+                    .context("Could not generate full calendar")?,
+            });
+
+            println!("{}", value.to_string());
         }
     }
 
@@ -207,27 +232,30 @@ async fn today(conn: &zbus::Connection, whitelist: Option<Vec<String>>) -> anyho
     }
 
     // Put them in a table.
-    let mut table = prettytable::Table::new();
-    table.set_format(*prettytable::format::consts::FORMAT_CLEAN);
+    let lines = today_events
+        .iter()
+        .map(|item| {
+            let starts = item
+                .starts
+                .map(|dt| utils::human_short_time(dt))
+                .unwrap_or("?".to_owned());
 
-    for item in today_events.iter() {
-        let starts = item
-            .starts
-            .map(|dt| utils::human_short_time(dt))
-            .unwrap_or("?".to_owned());
+            let ends = item
+                .ends
+                .map(|dt| utils::human_short_time(dt))
+                .unwrap_or("?".to_owned());
 
-        let ends = item
-            .ends
-            .map(|dt| utils::human_short_time(dt))
-            .unwrap_or("?".to_owned());
+            format!(
+                "• {} @ {}-{}",
+                item.title.as_deref().unwrap_or("Unknown Event"),
+                starts,
+                ends,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
 
-        table.add_row(prettytable::row![
-            item.title.as_deref().unwrap_or("Unknown Event"),
-            &format!("{}-{}", starts, ends),
-        ]);
-    }
-
-    Ok(table.to_string())
+    Ok(format!("Today\n{}", lines))
 }
 
 // Returns a list of near events.

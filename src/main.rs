@@ -19,13 +19,14 @@ enum Command {
 
     /// Generates a summary of all the ongoing events and upcoming events.
     Summary {
-        /// The names of calendars to fetch the events from. Defaults to all the calendars
+        /// The whitelist of calendars to fetch the events from. Defaults to all the calendars
         /// available to nexte. You can run `nexte calendars` to find out the names of all
         /// the available calendars.
+        #[arg(short, long)]
         calendars: Option<Vec<String>>,
 
         /// If enabled, the summary will only contain events from today.
-        #[arg(default_value_t = true)]
+        #[arg(short, long, default_value_t = true)]
         limit_to_today: bool,
     },
 }
@@ -113,7 +114,7 @@ async fn summary(
             Some(icalendar::ICalendarStatus::Completed) => true,
             Some(icalendar::ICalendarStatus::Final) => true,
             Some(icalendar::ICalendarStatus::InProcess) => true,
-            _ => false,
+            _ => true,
         })
         .collect();
 

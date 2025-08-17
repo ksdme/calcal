@@ -1,7 +1,7 @@
 use crate::eds::{event::Event, ipc};
 use anyhow::Context;
 use calcard::icalendar;
-use chrono::{Days, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
+use chrono::Days;
 use gio::glib;
 
 #[derive(Debug)]

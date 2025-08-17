@@ -1,4 +1,5 @@
 use anyhow::Context;
+use calcard::icalendar;
 
 mod eds;
 
@@ -23,6 +24,20 @@ async fn main() -> anyhow::Result<()> {
             .context("Could not fetch today events")?;
         near_events.append(&mut events);
     }
+
+    // Remove all events that are not happening.
+    // TODO: Ideally, we should check attendees and remove events that you declined.
+    near_events = near_events
+        .into_iter()
+        .filter(|e| match e.status {
+            Some(icalendar::ICalendarStatus::Tentative) => true,
+            Some(icalendar::ICalendarStatus::Confirmed) => true,
+            Some(icalendar::ICalendarStatus::Completed) => true,
+            Some(icalendar::ICalendarStatus::Final) => true,
+            Some(icalendar::ICalendarStatus::InProcess) => true,
+            _ => false,
+        })
+        .collect();
 
     // Sort all events by start time.
     near_events.sort_by(|a, b| a.starts.cmp(&b.starts));

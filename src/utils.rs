@@ -18,3 +18,8 @@ pub fn human_short_duration(delta: chrono::TimeDelta) -> String {
     let duration = std::time::Duration::new(seconds, 0);
     humantime::format_duration(duration).to_string()
 }
+
+// Returns a short human formatted time.
+pub fn human_short_time(dt: chrono::DateTime<rrule::Tz>) -> String {
+    dt.format("%-l:%M%P").to_string()
+}

@@ -1,20 +1,87 @@
 use anyhow::Context;
 use calcard::icalendar;
+use clap::Parser;
 
 mod eds;
+mod utils;
+
+#[derive(Debug, clap::Parser)]
+#[command(about = "Retrieves upcoming events from your calendar.")]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Debug, clap::Subcommand)]
+enum Command {
+    /// List all the calendars available to nexte.
+    Calendars,
+
+    /// Generates a summary of all the ongoing events and upcoming events.
+    Summary {
+        /// The names of calendars to fetch the events from. Defaults to all the calendars
+        /// available to nexte. You can run `nexte calendars` to find out the names of all
+        /// the available calendars.
+        calendars: Option<Vec<String>>,
+    },
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+
     let conn = zbus::connection::Builder::session()
         .context("Could not build dbus session")?
         .build()
         .await
         .context("Could not connect to session dbus")?;
 
-    let mut calendars = eds::calendar::Calendar::fetch_all(&conn)
-        .await
-        .context("Could not list all calendars")?;
-    calendars.sort_by(|a, b| a.display_name.cmp(&b.display_name));
+    match cli.command {
+        Command::Calendars => {
+            calendars(&conn).await.context("Could not list calendars")?;
+        }
+
+        Command::Summary { calendars } => {
+            summary(&conn, calendars)
+                .await
+                .context("Could not generate summary")?;
+        }
+    }
+
+    Ok(())
+}
+
+// Print a list of all the known calendars.
+async fn calendars(conn: &zbus::Connection) -> anyhow::Result<()> {
+    let calendars = fetch_calendars(conn).await?;
+
+    for cal in calendars.iter() {
+        println!(
+            "{}",
+            match &cal.display_name {
+                Some(name) => name,
+                None => "Unknown",
+            }
+        );
+    }
+
+    Ok(())
+}
+
+// Returns the status of the current or upcoming events.
+async fn summary(conn: &zbus::Connection, whitelist: Option<Vec<String>>) -> anyhow::Result<()> {
+    let mut calendars = fetch_calendars(conn).await?;
+
+    // Apply the whitelist if necessary.
+    if let Some(whitelist) = whitelist {
+        calendars = calendars
+            .into_iter()
+            .filter(|c| match &c.display_name {
+                Some(name) => whitelist.contains(name),
+                _ => false,
+            })
+            .collect();
+    }
 
     let mut near_events = Vec::new();
     for calendar in calendars.iter() {
@@ -66,7 +133,7 @@ async fn main() -> anyhow::Result<()> {
         println!(
             "{} ends in {}",
             event.title.clone().unwrap_or("Unknown Event".to_owned()),
-            report_duration(ends.to_utc() - now.to_utc()),
+            utils::human_short_duration(ends.to_utc() - now.to_utc()),
         );
     } else {
         // Remaining events are either in progress or are upcoming.
@@ -75,7 +142,7 @@ async fn main() -> anyhow::Result<()> {
                 print!(
                     "{} in {}",
                     event.title.clone().unwrap_or("Unknown Event".to_owned()),
-                    report_duration(starts.to_utc() - now.to_utc()),
+                    utils::human_short_duration(starts.to_utc() - now.to_utc()),
                 );
             } else {
                 print!("No Upcoming Event Today");
@@ -88,11 +155,14 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-// Returns a short human formatted duration.
-fn report_duration(delta: chrono::TimeDelta) -> String {
-    let mut seconds = delta.num_seconds().max(0) as u64;
-    seconds -= seconds % 60;
+// Return a list of calendars from the connection.
+async fn fetch_calendars(conn: &zbus::Connection) -> anyhow::Result<Vec<eds::calendar::Calendar>> {
+    let mut calendars = eds::calendar::Calendar::fetch_all(&conn)
+        .await
+        .context("Could not list all calendars")?;
 
-    let duration = std::time::Duration::new(seconds, 0);
-    humantime::format_duration(duration).to_string()
+    // Sort them so you have a stable order.
+    calendars.sort_by(|a, b| a.display_name.cmp(&b.display_name));
+
+    Ok(calendars)
 }

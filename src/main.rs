@@ -14,7 +14,7 @@ struct Cli {
 
 #[derive(Debug, clap::Subcommand)]
 enum Command {
-    /// List all the calendars available to nexte.
+    /// List all the calendars available to calcal.
     Calendars,
 
     /// Generates a summary of all the ongoing events and upcoming events.

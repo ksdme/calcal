@@ -75,6 +75,8 @@ Once you have `calcal` working as expected, you can add it to your Waybar config
 }
 ```
 
+And, this is how it looks with my configuration.
+
 <p align="center">
   <img src="./assets/waybar-demo.png" width="100%" height="auto">
 </p>

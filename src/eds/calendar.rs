@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::eds::{event::Event, ipc};
 use anyhow::Context;
 use calcard::icalendar;
@@ -109,6 +111,7 @@ impl<'a> Calendar<'a> {
             .await
             .context("Could not query events")?;
 
+        let mut seen = HashSet::<String>::new();
         let vevents: Vec<icalendar::ICalendarComponent> = vevent_result
             .iter()
             .filter_map(|item| icalendar::ICalendar::parse(item).ok())
@@ -117,6 +120,19 @@ impl<'a> Calendar<'a> {
                     .into_iter()
                     .filter(|item| item.component_type == icalendar::ICalendarComponentType::VEvent)
                     .collect()
+            })
+            // For some reason, Evolution returns duplicates for some events. There could
+            // be a deeper cause to this, but, here, we discard them by the UID.
+            .filter(|vevent| match vevent.uid() {
+                Some(uid) => {
+                    if seen.contains(uid) {
+                        false
+                    } else {
+                        seen.insert(uid.to_owned());
+                        true
+                    }
+                }
+                _ => false,
             })
             .collect();
 

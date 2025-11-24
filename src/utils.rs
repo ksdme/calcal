@@ -21,5 +21,7 @@ pub fn human_short_duration(delta: chrono::TimeDelta) -> String {
 
 // Returns a short human formatted time.
 pub fn human_short_time(dt: chrono::DateTime<rrule::Tz>) -> String {
-    dt.format("%-l:%M%P").to_string()
+    dt.with_timezone(&chrono::Local)
+        .format("%-l:%M%P")
+        .to_string()
 }

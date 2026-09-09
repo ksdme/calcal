@@ -1,13 +1,15 @@
 // Normalizes a timezone string value.
 pub fn normalize_timezone(tz: &str) -> &str {
-    if tz.starts_with('/') {
+    let tz = if tz.starts_with('/') {
         // EDS can report timezones that look like "/freeassociation.sourceforge.net/Asia/Kolkata".
         // The prefix there is supposed to be the vendor prefix. So, in this case, if a timezone
         // looks like a path, we assume the second fragment to be the actual timezone value.
         tz.splitn(3, '/').last().unwrap_or(tz)
     } else {
         tz
-    }
+    };
+
+    localzone::win_zone_to_iana(tz, None).unwrap_or(tz)
 }
 
 // Returns a short human formatted duration.

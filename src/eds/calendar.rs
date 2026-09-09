@@ -74,6 +74,35 @@ impl<'a> Calendar<'a> {
         Ok(calendars)
     }
 
+    pub async fn refresh(&self) -> anyhow::Result<()> {
+        let calendar_factory_proxy = ipc::CalendarFactoryProxy::new(self.conn)
+            .await
+            .context("Could not build calendar factory proxy")?;
+
+        let (calendar_path, _) = calendar_factory_proxy
+            .open_calendar(&self.uid)
+            .await
+            .context("Could not query calendar")?;
+
+        let calendar_proxy = ipc::CalendarProxy::builder(self.conn)
+            .path(calendar_path)
+            .context("Could not set path on calendar proxy")?
+            .build()
+            .await
+            .context("Could not build calendar proxy")?;
+
+        let _ = calendar_proxy.open().await;
+
+        if let Err(err) = calendar_proxy.refresh().await {
+            let err_str = err.to_string();
+            if !err_str.contains("Not supported") && !err_str.contains("Code11") {
+                return Err(err).context("Could not refresh calendar");
+            }
+        }
+
+        Ok(())
+    }
+
     // Returns a list of all the events found on this calendar on the EDS.
     async fn fetch_events(
         &self,
@@ -106,10 +135,17 @@ impl<'a> Calendar<'a> {
             ends.format("%Y%m%dT%H%M%S")
         );
 
-        let vevent_result = calendar_proxy
-            .get_object_list(&q)
-            .await
-            .context("Could not query events")?;
+        let vevent_result = match calendar_proxy.get_object_list(&q).await {
+            Ok(result) => result,
+            Err(err) if err.to_string().contains("Backend is not opened") => {
+                let _ = calendar_proxy.open().await;
+                calendar_proxy
+                    .get_object_list(&q)
+                    .await
+                    .context("Could not query events")?
+            }
+            Err(err) => return Err(err).context("Could not query events"),
+        };
 
         let mut seen = HashSet::<String>::new();
         let vevents: Vec<icalendar::ICalendarComponent> = vevent_result

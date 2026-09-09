@@ -33,6 +33,8 @@ pub trait CalendarFactory {
     interface = "org.gnome.evolution.dataserver.Calendar"
 )]
 pub trait Calendar {
+    async fn open(&self) -> zbus::Result<Vec<String>>;
+    async fn refresh(&self) -> zbus::Result<()>;
     // This call returns ics_objects based on a query string. The object path
     // to query should be based on the calendar.
     async fn get_object_list(&self, q: &str) -> zbus::Result<Vec<String>>;

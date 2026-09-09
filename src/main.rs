@@ -77,7 +77,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Today { calendars } => {
             println!(
                 "{}",
-                today(&conn, calendars)
+                today(&conn, calendars, TodayFormat::Terminal)
                     .await
                     .context("Could not generate full calendar")?,
             )
@@ -93,7 +93,7 @@ async fn main() -> anyhow::Result<()> {
                     .await
                     .context("Could not generate summary")?,
 
-                "tooltip": today(&conn, calendars)
+                "tooltip": today(&conn, calendars, TodayFormat::Pango)
                     .await
                     .context("Could not generate full calendar")?,
             });
@@ -103,6 +103,54 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum TodayFormat {
+    Terminal,
+    Pango,
+}
+
+#[derive(Clone, Copy)]
+enum EventHighlight {
+    Current,
+    Next,
+}
+
+fn truncate_title(title: &str) -> String {
+    let mut chars = title.chars();
+    let truncated: String = chars.by_ref().take(27).collect();
+    if chars.next().is_some() {
+        format!("{}...", truncated)
+    } else {
+        truncated
+    }
+}
+
+fn highlight_event(line: &str, highlight: Option<EventHighlight>, format: TodayFormat) -> String {
+    match (highlight, format) {
+        (Some(EventHighlight::Current), TodayFormat::Terminal) => {
+            format!("\x1b[36m{}\x1b[0m", line)
+        }
+        (Some(EventHighlight::Next), TodayFormat::Terminal) => {
+            format!("\x1b[31m{}\x1b[0m", line)
+        }
+        (Some(EventHighlight::Current), TodayFormat::Pango) => {
+            format!("<span foreground=\"cyan\">{}</span>", escape_markup(line))
+        }
+        (Some(EventHighlight::Next), TodayFormat::Pango) => {
+            format!("<span foreground=\"red\">{}</span>", escape_markup(line))
+        }
+        (None, TodayFormat::Terminal) => line.to_owned(),
+        (None, TodayFormat::Pango) => escape_markup(line),
+    }
+}
+
+fn escape_markup(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 // Print a list of all the known calendars.
@@ -136,7 +184,13 @@ async fn summary(
     let active_events: Vec<_> = near_events
         .iter()
         .filter_map(|event| match (event.starts, event.ends) {
-            (Some(starts), Some(ends)) if ends > now => Some((starts, ends, event)),
+            (Some(starts), Some(ends))
+                if ends > now
+                    && !(starts.time() == chrono::NaiveTime::default()
+                        && ends.time() == chrono::NaiveTime::default()) =>
+            {
+                Some((starts, ends, event))
+            }
             _ => None,
         })
         .collect();
@@ -154,7 +208,7 @@ async fn summary(
                 .iter()
                 .map(|(_, ends, event)| format!(
                     "{} ends in {}",
-                    event.title.clone().unwrap_or("Unknown Event".to_owned()),
+                    truncate_title(event.title.as_deref().unwrap_or("Unknown Event")),
                     utils::human_short_duration(ends.to_utc() - now.to_utc()),
                 ))
                 .collect::<Vec<String>>()
@@ -193,8 +247,10 @@ async fn summary(
         if let Some((starts, _, _)) = filtered.first() {
             let names = filtered
                 .iter()
-                .map(|(_, _, event)| event.title.as_deref().unwrap_or("Unknown Event"))
-                .collect::<Vec<&str>>()
+                .map(|(_, _, event)| {
+                    truncate_title(event.title.as_deref().unwrap_or("Unknown Event"))
+                })
+                .collect::<Vec<String>>()
                 .join(", ");
 
             return Ok(format!(
@@ -211,11 +267,16 @@ async fn summary(
 }
 
 // Prints a list of all the events today.
-async fn today(conn: &zbus::Connection, whitelist: Option<Vec<String>>) -> anyhow::Result<String> {
+async fn today(
+    conn: &zbus::Connection,
+    whitelist: Option<Vec<String>>,
+    format: TodayFormat,
+) -> anyhow::Result<String> {
     let near_events = near_events(conn, whitelist).await?;
 
     // Filter for today.
-    let today = chrono::Local::now().date_naive();
+    let now = chrono::Local::now().with_timezone(&rrule::Tz::Local(chrono::Local));
+    let today = now.date_naive();
     let today_events = near_events
         .into_iter()
         .filter(|e| {
@@ -231,6 +292,11 @@ async fn today(conn: &zbus::Connection, whitelist: Option<Vec<String>>) -> anyho
         return Ok("No Events Today".to_owned());
     }
 
+    let next_start = today_events
+        .iter()
+        .filter_map(|event| event.starts.filter(|starts| starts > &now))
+        .min();
+
     // Put them in a table.
     let lines = today_events
         .iter()
@@ -245,12 +311,21 @@ async fn today(conn: &zbus::Connection, whitelist: Option<Vec<String>>) -> anyho
                 .map(|dt| utils::human_short_time(dt))
                 .unwrap_or("?".to_owned());
 
-            format!(
-                "• {} @ {}-{}",
-                item.title.as_deref().unwrap_or("Unknown Event"),
+            let line = format!(
+                "{}-{} {}",
                 starts,
                 ends,
-            )
+                item.title.as_deref().unwrap_or("Unknown Event"),
+            );
+            let highlight = match (item.starts, item.ends) {
+                (Some(starts), Some(ends)) if starts <= now && ends > now => {
+                    Some(EventHighlight::Current)
+                }
+                (Some(starts), _) if Some(starts) == next_start => Some(EventHighlight::Next),
+                _ => None,
+            };
+
+            highlight_event(&line, highlight, format)
         })
         .collect::<Vec<_>>()
         .join("\n");

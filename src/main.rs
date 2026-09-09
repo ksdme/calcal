@@ -19,9 +19,13 @@ enum Command {
 
     /// Generates a summary of all the ongoing events and upcoming events.
     Summary {
-        /// The whitelist of calendars to fetch the events from. Defaults to all calendars.
+        /// The calendars to include in the results. Defaults to all calendars.
         #[arg(short, long)]
         calendars: Option<Vec<String>>,
+
+        /// The calendars to exclude from the results.
+        #[arg(short, long)]
+        exclude_calendars: Option<Vec<String>>,
 
         /// If enabled, the summary will only contain events from today.
         #[arg(short, long, default_value_t = true)]
@@ -30,16 +34,24 @@ enum Command {
 
     /// Generates a simple table of all the events today.
     Today {
-        /// The whitelist of calendars to fetch the events from. Defaults to all calendars.
+        /// The calendars to include in the results. Defaults to all calendars.
         #[arg(short, long)]
         calendars: Option<Vec<String>>,
+
+        /// The calendars to exclude from the results.
+        #[arg(short, long)]
+        exclude_calendars: Option<Vec<String>>,
     },
 
     /// Emits calendar information in a Waybar compatible JSON schema.
     Waybar {
-        /// The whitelist of calendars to fetch the events from. Defaults to all calendars.
+        /// The calendars to include in the results. Defaults to all calendars.
         #[arg(short, long)]
         calendars: Option<Vec<String>>,
+
+        /// The calendars to exclude from the results.
+        #[arg(short, long)]
+        exclude_calendars: Option<Vec<String>>,
 
         /// If enabled, the summary will only contain events from today.
         #[arg(short, long, default_value_t = true)]
@@ -64,20 +76,24 @@ async fn main() -> anyhow::Result<()> {
 
         Command::Summary {
             calendars,
+            exclude_calendars,
             limit_to_today,
         } => {
             println!(
                 "{}",
-                summary(&conn, calendars, limit_to_today)
+                summary(&conn, calendars, exclude_calendars, limit_to_today)
                     .await
                     .context("Could not generate summary")?,
             );
         }
 
-        Command::Today { calendars } => {
+        Command::Today {
+            calendars,
+            exclude_calendars,
+        } => {
             println!(
                 "{}",
-                today(&conn, calendars)
+                today(&conn, calendars, exclude_calendars)
                     .await
                     .context("Could not generate full calendar")?,
             )
@@ -85,15 +101,21 @@ async fn main() -> anyhow::Result<()> {
 
         Command::Waybar {
             calendars,
+            exclude_calendars,
             limit_to_today,
         } => {
             // https://man.archlinux.org/man/extra/waybar/waybar-custom.5.en#RETURN-TYPE
             let value = serde_json::json!({
-                "text": summary(&conn, calendars.clone(), limit_to_today)
+                "text": summary(
+                    &conn,
+                    calendars.clone(),
+                    exclude_calendars.clone(),
+                    limit_to_today,
+                )
                     .await
                     .context("Could not generate summary")?,
 
-                "tooltip": today(&conn, calendars)
+                "tooltip": today(&conn, calendars, exclude_calendars)
                     .await
                     .context("Could not generate full calendar")?,
             });
@@ -125,10 +147,11 @@ async fn calendars(conn: &zbus::Connection) -> anyhow::Result<()> {
 // Returns the status of the current or upcoming events.
 async fn summary(
     conn: &zbus::Connection,
-    whitelist: Option<Vec<String>>,
+    include_calendars: Option<Vec<String>>,
+    exclude_calendars: Option<Vec<String>>,
     limit_to_today: bool,
 ) -> anyhow::Result<String> {
-    let near_events = near_events(conn, whitelist).await?;
+    let near_events = near_events(conn, include_calendars, exclude_calendars).await?;
 
     // Filter out events that do not have a start and an end date.
     // Filter out events that were completed in the past.
@@ -211,8 +234,12 @@ async fn summary(
 }
 
 // Prints a list of all the events today.
-async fn today(conn: &zbus::Connection, whitelist: Option<Vec<String>>) -> anyhow::Result<String> {
-    let near_events = near_events(conn, whitelist).await?;
+async fn today(
+    conn: &zbus::Connection,
+    include_calendars: Option<Vec<String>>,
+    exclude_calendars: Option<Vec<String>>,
+) -> anyhow::Result<String> {
+    let near_events = near_events(conn, include_calendars, exclude_calendars).await?;
 
     // Filter for today.
     let today = chrono::Local::now().date_naive();
@@ -261,19 +288,30 @@ async fn today(conn: &zbus::Connection, whitelist: Option<Vec<String>>) -> anyho
 // Returns a list of near events.
 async fn near_events(
     conn: &zbus::Connection,
-    whitelist: Option<Vec<String>>,
+    include_calendars: Option<Vec<String>>,
+    exclude_calendars: Option<Vec<String>>,
 ) -> anyhow::Result<Vec<eds::event::Event>> {
     let mut calendars = fetch_calendars(conn).await?;
 
-    // Apply the whitelist if necessary.
-    if let Some(whitelist) = whitelist {
+    // Apply the calendar inclusion filter if necessary.
+    if let Some(include_calendars) = include_calendars {
         calendars = calendars
             .into_iter()
             .filter(|c| match &c.display_name {
-                Some(name) => whitelist.contains(name),
+                Some(name) => include_calendars.contains(name),
                 _ => false,
             })
             .collect();
+    }
+
+    if let Some(exclude_calendars) = exclude_calendars {
+        calendars.retain(|calendar| {
+            calendar
+                .display_name
+                .as_ref()
+                .map(|name| !exclude_calendars.contains(name))
+                .unwrap_or(true)
+        });
     }
 
     let mut near_events = Vec::new();

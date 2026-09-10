@@ -171,18 +171,34 @@ async fn summary(
         .collect();
 
     if ongoing.len() > 0 {
-        return Ok(format!(
-            "{}",
-            ongoing
-                .iter()
-                .map(|(_, ends, event)| format!(
+        let current = ongoing
+            .iter()
+            .map(|(_, ends, event)| {
+                format!(
                     "{} ends in {}",
-                    event.title.clone().unwrap_or("Unknown Event".to_owned()),
+                    event.title.as_deref().unwrap_or("Unknown Event"),
                     utils::human_short_duration(ends.to_utc() - now.to_utc()),
-                ))
-                .collect::<Vec<String>>()
-                .join(", ")
-        ));
+                )
+            })
+            .collect::<Vec<String>>()
+            .join(", ");
+
+        let next = active_events.iter().find(|(starts, _, _)| {
+            starts > &&now
+                && (!limit_to_today
+                    || starts.with_timezone(&chrono::Local).date_naive() == now.date_naive())
+        });
+
+        if let Some((starts, _, event)) = next {
+            return Ok(format!(
+                "{}, {} in {}",
+                current,
+                event.title.as_deref().unwrap_or("Unknown Event"),
+                utils::human_short_duration(starts.to_utc() - now.to_utc()),
+            ));
+        }
+
+        return Ok(current);
     }
 
     // If we are here, it means all events are upcoming.

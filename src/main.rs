@@ -105,19 +105,24 @@ async fn main() -> anyhow::Result<()> {
             limit_to_today,
         } => {
             // https://man.archlinux.org/man/extra/waybar/waybar-custom.5.en#RETURN-TYPE
-            let value = serde_json::json!({
-                "text": summary(
-                    &conn,
-                    calendars.clone(),
-                    exclude_calendars.clone(),
-                    limit_to_today,
-                )
-                    .await
-                    .context("Could not generate summary")?,
+            // Waybar renders both fields as Pango markup, so event titles
+            // containing characters like `&` or `<` must be escaped.
+            let text = summary(
+                &conn,
+                calendars.clone(),
+                exclude_calendars.clone(),
+                limit_to_today,
+            )
+            .await
+            .context("Could not generate summary")?;
 
-                "tooltip": today(&conn, calendars, exclude_calendars)
-                    .await
-                    .context("Could not generate full calendar")?,
+            let tooltip = today(&conn, calendars, exclude_calendars)
+                .await
+                .context("Could not generate full calendar")?;
+
+            let value = serde_json::json!({
+                "text": utils::escape_markup(&text),
+                "tooltip": utils::escape_markup(&tooltip),
             });
 
             println!("{}", value.to_string());

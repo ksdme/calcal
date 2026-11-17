@@ -27,3 +27,19 @@ pub fn human_short_time(dt: chrono::DateTime<rrule::Tz>) -> String {
         .format("%-l:%M%P")
         .to_string()
 }
+
+// Escapes text so it can be safely rendered as Pango markup (used by Waybar).
+pub fn escape_markup(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&#39;"),
+            _ => escaped.push(c),
+        }
+    }
+    escaped
+}
